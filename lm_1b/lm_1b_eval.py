@@ -84,7 +84,7 @@ def _LoadModel(gd_file, ckpt_file):
   with tf.Graph().as_default():
     sys.stderr.write('Recovering graph.\n')
     with tf.gfile.FastGFile(gd_file, 'r') as f:
-      s = f.read().decode()
+      s = f.read()
       gd = tf.GraphDef()
       text_format.Merge(s, gd)
 
@@ -248,7 +248,7 @@ def _DumpEmb(vocab):
   sys.stderr.write('Embedding file saved\n')
 
 
-def _DumpSentenceEmbedding(sentence, vocab):
+def _DumpSentenceEmbedding(sentence, vocab_file):
   """Predict next words using the given prefix words.
 
   Args:
@@ -256,36 +256,42 @@ def _DumpSentenceEmbedding(sentence, vocab):
     vocab: Vocabulary. Contains max word chard id length and converts between
         words and ids.
   """
-  targets = np.zeros([BATCH_SIZE, NUM_TIMESTEPS], np.int32)
-  weights = np.ones([BATCH_SIZE, NUM_TIMESTEPS], np.float32)
+  embeddings, word_ids = get_sentence_embeddings(sentence, vocab_file, FLAGS.pbtxt, FLAGS.ckpt)
 
-  sess, t = _LoadModel(FLAGS.pbtxt, FLAGS.ckpt)
-
-  if sentence.find('<S>') != 0:
-    sentence = '<S> ' + sentence
-
-  word_ids = [vocab.word_to_id(w) for w in sentence.split()]
-  char_ids = [vocab.word_to_char_ids(w) for w in sentence.split()]
-
-  inputs = np.zeros([BATCH_SIZE, NUM_TIMESTEPS], np.int32)
-  char_ids_inputs = np.zeros(
-      [BATCH_SIZE, NUM_TIMESTEPS, vocab.max_word_length], np.int32)
   for i in xrange(len(word_ids)):
-    inputs[0, 0] = word_ids[i]
-    char_ids_inputs[0, 0, :] = char_ids[i]
-
-    # Add 'lstm/lstm_0/control_dependency' if you want to dump previous layer
-    # LSTM.
-    lstm_emb = sess.run(t['lstm/lstm_1/control_dependency'],
-                        feed_dict={t['char_inputs_in']: char_ids_inputs,
-                                   t['inputs_in']: inputs,
-                                   t['targets_in']: targets,
-                                   t['target_weights_in']: weights})
-
     fname = os.path.join(FLAGS.save_dir, 'lstm_emb_step_%d.npy' % i)
     with tf.gfile.Open(fname, mode='w') as f:
-      np.save(f, lstm_emb)
+      np.save(f, embeddings[i])
     sys.stderr.write('LSTM embedding step %d file saved\n' % i)
+
+
+def get_sentence_embeddings(sentence, vocab_file='data/vocab-2016-09-10.txt',
+                            pbtxt='data/graph-2016-09-10.pbtxt', ckpt='data/ckpt-*'):
+    vocab = data_utils.CharsVocabulary(vocab_file, MAX_WORD_LEN)
+    targets = np.zeros([BATCH_SIZE, NUM_TIMESTEPS], np.int32)
+    weights = np.ones([BATCH_SIZE, NUM_TIMESTEPS], np.float32)
+    sess, t = _LoadModel(pbtxt, ckpt)
+    if sentence.find('<S>') != 0:
+        sentence = '<S> ' + sentence
+    word_ids = [vocab.word_to_id(w) for w in sentence.split()]
+    char_ids = [vocab.word_to_char_ids(w) for w in sentence.split()]
+    inputs = np.zeros([BATCH_SIZE, NUM_TIMESTEPS], np.int32)
+    char_ids_inputs = np.zeros(
+        [BATCH_SIZE, NUM_TIMESTEPS, vocab.max_word_length], np.int32)
+    embeddings = []
+    for i in xrange(len(word_ids)):
+        inputs[0, 0] = word_ids[i]
+        char_ids_inputs[0, 0, :] = char_ids[i]
+
+        # Add 'lstm/lstm_0/control_dependency' if you want to dump previous layer
+        # LSTM.
+        lstm_emb = sess.run(t['lstm/lstm_1/control_dependency'],
+                            feed_dict={t['char_inputs_in']: char_ids_inputs,
+                                       t['inputs_in']: inputs,
+                                       t['targets_in']: targets,
+                                       t['target_weights_in']: weights})
+        embeddings.append(lstm_emb)
+    return embeddings, word_ids
 
 
 def main(unused_argv):
@@ -299,7 +305,7 @@ def main(unused_argv):
   elif FLAGS.mode == 'dump_emb':
     _DumpEmb(vocab)
   elif FLAGS.mode == 'dump_lstm_emb':
-    _DumpSentenceEmbedding(FLAGS.sentence, vocab)
+    _DumpSentenceEmbedding(FLAGS.sentence, FLAGS.vocab_file)
   else:
     raise Exception('Mode not supported.')
 
