@@ -23,7 +23,7 @@ from six.moves import xrange
 import tensorflow as tf
 
 from google.protobuf import text_format
-from . import data_utils
+from lm_1b import data_utils
 
 FLAGS = tf.flags.FLAGS
 # General flags.
@@ -256,7 +256,9 @@ def _DumpSentenceEmbedding(sentence, vocab_file):
     vocab: Vocabulary. Contains max word chard id length and converts between
         words and ids.
   """
-  embeddings, word_ids = get_sentence_embeddings(sentence, vocab_file, FLAGS.pbtxt, FLAGS.ckpt)
+  encoder = Encoder(vocab_file, FLAGS.pbtxt, FLAGS.ckpt)
+  embeddings, word_ids = encoder([sentence])
+  embeddings, word_ids = embeddings[0], word_ids[0]
 
   for i in xrange(len(word_ids)):
     fname = os.path.join(FLAGS.save_dir, 'lstm_emb_step_%d.npy' % i)
@@ -265,33 +267,42 @@ def _DumpSentenceEmbedding(sentence, vocab_file):
     sys.stderr.write('LSTM embedding step %d file saved\n' % i)
 
 
-def get_sentence_embeddings(sentence, vocab_file='data/vocab-2016-09-10.txt',
-                            pbtxt='data/graph-2016-09-10.pbtxt', ckpt='data/ckpt-*'):
-    vocab = data_utils.CharsVocabulary(vocab_file, MAX_WORD_LEN)
+class Encoder(object):
+  def __init__(self, vocab_file='data/vocab-2016-09-10.txt',
+                     pbtxt='data/graph-2016-09-10.pbtxt', ckpt='data/ckpt-*'):
+    self.sess, self.t = _LoadModel(pbtxt, ckpt)
+
+    self.vocab = data_utils.CharsVocabulary(vocab_file, MAX_WORD_LEN)
+
+  def __call__(self, sentences):
+    self.sess.run(self.t['states_init'])
     targets = np.zeros([BATCH_SIZE, NUM_TIMESTEPS], np.int32)
     weights = np.ones([BATCH_SIZE, NUM_TIMESTEPS], np.float32)
-    sess, t = _LoadModel(pbtxt, ckpt)
-    if sentence.find('<S>') != 0:
+    sentences_embeddings, sentences_word_ids = [], []
+    for sentence in sentences:
+      if sentence.find('<S>') != 0:
         sentence = '<S> ' + sentence
-    word_ids = [vocab.word_to_id(w) for w in sentence.split()]
-    char_ids = [vocab.word_to_char_ids(w) for w in sentence.split()]
-    inputs = np.zeros([BATCH_SIZE, NUM_TIMESTEPS], np.int32)
-    char_ids_inputs = np.zeros(
-        [BATCH_SIZE, NUM_TIMESTEPS, vocab.max_word_length], np.int32)
-    embeddings = []
-    for i in xrange(len(word_ids)):
+      word_ids = [self.vocab.word_to_id(w) for w in sentence.split()]
+      char_ids = [self.vocab.word_to_char_ids(w) for w in sentence.split()]
+      inputs = np.zeros([BATCH_SIZE, NUM_TIMESTEPS], np.int32)
+      char_ids_inputs = np.zeros(
+        [BATCH_SIZE, NUM_TIMESTEPS, self.vocab.max_word_length], np.int32)
+      embeddings = []
+      for i in xrange(len(word_ids)):
         inputs[0, 0] = word_ids[i]
         char_ids_inputs[0, 0, :] = char_ids[i]
 
         # Add 'lstm/lstm_0/control_dependency' if you want to dump previous layer
         # LSTM.
-        lstm_emb = sess.run(t['lstm/lstm_1/control_dependency'],
-                            feed_dict={t['char_inputs_in']: char_ids_inputs,
-                                       t['inputs_in']: inputs,
-                                       t['targets_in']: targets,
-                                       t['target_weights_in']: weights})
+        lstm_emb = self.sess.run(self.t['lstm/lstm_1/control_dependency'],
+                                 feed_dict={self.t['char_inputs_in']: char_ids_inputs,
+                                            self.t['inputs_in']: inputs,
+                                            self.t['targets_in']: targets,
+                                            self.t['target_weights_in']: weights})
         embeddings.append(lstm_emb)
-    return embeddings, word_ids
+      sentences_embeddings.append(embeddings)
+      sentences_word_ids.append(word_ids)
+    return sentences_embeddings, sentences_word_ids
 
 
 def main(unused_argv):
