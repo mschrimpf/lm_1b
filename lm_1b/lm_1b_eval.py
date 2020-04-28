@@ -71,12 +71,13 @@ NUM_TIMESTEPS = 1
 MAX_WORD_LEN = 50
 
 
-def _LoadModel(gd_file, ckpt_file=None):
+def _LoadModel(gd_file, ckpt_file, reset_weights=False):
   """Load the model from GraphDef and Checkpoint.
 
   Args:
     gd_file: GraphDef proto text file.
     ckpt_file: TensorFlow Checkpoint file. `None` to not load any weights
+    reset_weights: True to reset weights to their initial values
 
   Returns:
     TensorFlow session and tensors dict.
@@ -111,11 +112,12 @@ def _LoadModel(gd_file, ckpt_file=None):
                                      'global_step:0'], name='')
 
     sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
-    if ckpt_file:
-        sys.stderr.write('Recovering checkpoint %s\n' % ckpt_file)
-        sess.run('save/restore_all', {'save/Const:0': ckpt_file})
-    else:
-        sys.stderr.write('NOT recovering checkpoint\n')
+    sys.stderr.write('Recovering checkpoint %s\n' % ckpt_file)
+    sess.run('save/restore_all', {'save/Const:0': ckpt_file})
+    if reset_weights:
+      sys.stderr.write('Resetting weights\n')
+      init = tf.initialize_all_variables()
+      sess.run(init)
     sess.run(t['states_init'])
 
   return sess, t
@@ -272,8 +274,8 @@ def _DumpSentenceEmbedding(sentence, vocab_file):
 
 class Encoder(object):
   def __init__(self, vocab_file='data/vocab-2016-09-10.txt',
-                     pbtxt='data/graph-2016-09-10.pbtxt', ckpt='data/ckpt-*'):
-    self.sess, self.t = _LoadModel(pbtxt, ckpt)
+                     pbtxt='data/graph-2016-09-10.pbtxt', ckpt='data/ckpt-*', reset_weights=False):
+    self.sess, self.t = _LoadModel(pbtxt, ckpt, reset_weights=reset_weights)
 
     self.vocab = data_utils.CharsVocabulary(vocab_file, MAX_WORD_LEN)
 
