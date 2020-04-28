@@ -71,12 +71,12 @@ NUM_TIMESTEPS = 1
 MAX_WORD_LEN = 50
 
 
-def _LoadModel(gd_file, ckpt_file):
+def _LoadModel(gd_file, ckpt_file=None):
   """Load the model from GraphDef and Checkpoint.
 
   Args:
     gd_file: GraphDef proto text file.
-    ckpt_file: TensorFlow Checkpoint file.
+    ckpt_file: TensorFlow Checkpoint file. `None` to not load any weights
 
   Returns:
     TensorFlow session and tensors dict.
@@ -110,9 +110,12 @@ def _LoadModel(gd_file, ckpt_file):
                                      'Reshape_3:0',
                                      'global_step:0'], name='')
 
-    sys.stderr.write('Recovering checkpoint %s\n' % ckpt_file)
     sess = tf.Session(config=tf.ConfigProto(allow_soft_placement=True))
-    sess.run('save/restore_all', {'save/Const:0': ckpt_file})
+    if ckpt_file:
+        sys.stderr.write('Recovering checkpoint %s\n' % ckpt_file)
+        sess.run('save/restore_all', {'save/Const:0': ckpt_file})
+    else:
+        sys.stderr.write('NOT recovering checkpoint\n')
     sess.run(t['states_init'])
 
   return sess, t
