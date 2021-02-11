@@ -24,6 +24,7 @@ import tensorflow as tf
 
 from google.protobuf import text_format
 from lm_1b import data_utils
+from tqdm import tqdm
 
 FLAGS = tf.flags.FLAGS
 # General flags.
@@ -279,14 +280,18 @@ class Encoder(object):
 
     self.vocab = data_utils.CharsVocabulary(vocab_file, MAX_WORD_LEN)
 
-  def __call__(self, sentences):
+  def __call__(self, sentences, progress_bar=False):
     self.sess.run(self.t['states_init'])
     targets = np.zeros([BATCH_SIZE, NUM_TIMESTEPS], np.int32)
     weights = np.ones([BATCH_SIZE, NUM_TIMESTEPS], np.float32)
     sentences_embeddings, sentences_word_ids = [], []
-    for sentence in sentences:
+    sentences_iter = enumerate(sentences)
+    if progress_bar:
+      sentences_iter = tqdm(sentences_iter, "lm1b sentences")
+    for i, sentence in sentences_iter:
       if sentence.find('<S>') != 0:
         sentence = '<S> ' + sentence
+      sentence = sentence.replace('–', '-')  # replace weird character
       word_ids = [self.vocab.word_to_id(w) for w in sentence.split()]
       char_ids = [self.vocab.word_to_char_ids(w) for w in sentence.split()]
       inputs = np.zeros([BATCH_SIZE, NUM_TIMESTEPS], np.int32)
